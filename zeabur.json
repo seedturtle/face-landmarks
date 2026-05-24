@@ -1,5 +1,7 @@
 {
   "$schema": "https://zeabur.com/schema.json",
   "buildCommand": "npm run build",
-  "outputDirectory": "dist"
+  "startCommand": "npm run start",
+  "outputDirectory": "dist",
+  "port": 8080
 }
