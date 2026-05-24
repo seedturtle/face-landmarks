@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as faceapi from 'face-api.js'
 
-const MODEL_URL = 'https://cdn.jsdelivr.net/npm/@vladmandic_face-api@1.7.12/model'
+// Load models from local /models folder (bundled in public/)
+const MODEL_URL = '/models'
 
 const COLORS: Record<string, string> = {
   Face: '#ff4444',
