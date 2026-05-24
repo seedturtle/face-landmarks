@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import * as faceapi from 'face-api.js'
 
-// Load models from local /models folder (bundled in public/)
+// Load models from public/models/ (bundled with the app)
 const MODEL_URL = '/models'
 
 const COLORS: Record<string, string> = {
