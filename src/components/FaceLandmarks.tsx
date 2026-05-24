@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import * as faceapi from 'face-api.js'
+import * as faceapi from '@vladmandic/face-api'
 
 // Load models from public/models/ (bundled with the app)
 const MODEL_URL = '/models'
