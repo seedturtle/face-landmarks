@@ -69,14 +69,21 @@ export default function FaceLandmarks() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const detectorRef = useRef<any>(null)
   const animationRef = useRef<number>(0)
+  const frameCountRef = useRef(0)
+  const detectionTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [status, setStatus] = useState<string>('Initializing...')
   const [faceCount, setFaceCount] = useState(0)
   const [modelLoaded, setModelLoaded] = useState(false)
   const [cameraReady, setCameraReady] = useState(false)
   const streamRef = useRef<MediaStream | null>(null)
+  const [detectionAttempts, setDetectionAttempts] = useState(0)
 
-  const startDetection = useCallback(async () => {
+  const startDetection = useCallback(() => {
+    let running = true
+
     async function detect() {
+      if (!running) return
+
       const video = videoRef.current
       const canvas = canvasRef.current
       const detector = detectorRef.current
@@ -85,7 +92,8 @@ export default function FaceLandmarks() {
         return
       }
 
-      if (video.readyState < 2) {
+      // Wait for video to have actual data
+      if (video.readyState < 2 || video.videoWidth === 0) {
         animationRef.current = requestAnimationFrame(detect)
         return
       }
@@ -99,32 +107,50 @@ export default function FaceLandmarks() {
         return
       }
 
+      frameCountRef.current++
+      if (frameCountRef.current % 10 === 0) {
+        setDetectionAttempts(prev => prev + 1)
+      }
+
       try {
         const faces = await detector.estimateFaces(video)
-        setFaceCount(faces.length)
+        const count = faces.length
+        setFaceCount(count)
 
-        if (faces.length > 0) {
+        if (count > 0) {
+          // Clear then draw each face
+          ctx.clearRect(0, 0, canvas.width, canvas.height)
           for (const face of faces) {
             drawFaceMesh(ctx, face.keypoints, canvas.width, canvas.height)
+          }
+          if (detectionTimeoutRef.current) {
+            clearTimeout(detectionTimeoutRef.current)
+            detectionTimeoutRef.current = null
           }
         } else {
           ctx.clearRect(0, 0, canvas.width, canvas.height)
         }
       } catch (err) {
         console.error('Detection error:', err)
+        ctx.clearRect(0, 0, canvas.width, canvas.height)
       }
 
       animationRef.current = requestAnimationFrame(detect)
     }
 
     detect()
+
+    return () => {
+      running = false
+      cancelAnimationFrame(animationRef.current)
+    }
   }, [])
 
   useEffect(() => {
     let cancelled = false
 
     async function init() {
-      setStatus('Loading TensorFlow.js...')
+      setStatus('Loading TensorFlow.js…')
 
       try {
         const tf = await import('@tensorflow/tfjs-core')
@@ -135,26 +161,25 @@ export default function FaceLandmarks() {
         console.log('TF backend:', tf.getBackend())
       } catch (e) {
         console.warn('WebGL backend failed, using CPU:', e)
-        await import('@tensorflow/tfjs-backend-cpu')
       }
 
       if (cancelled) return
-      setStatus('Loading face mesh model (MediaPipeFaceMesh)...')
+      setStatus('Loading face mesh model…')
 
       try {
         const faceLandmarksDetection = await import('@tensorflow-models/face-landmarks-detection')
         const model = faceLandmarksDetection.SupportedModels.MediaPipeFaceMesh
         const detector = await faceLandmarksDetection.createDetector(model, {
           runtime: 'tfjs',
-          refineLandmarks: true,
-          maxFaces: 3,
+          refineLandmarks: false,
+          maxFaces: 1,
         })
         detectorRef.current = detector
         setModelLoaded(true)
-        setStatus('Model loaded. Requesting camera...')
+        setStatus('Model loaded. Requesting camera…')
       } catch (e) {
         console.error('Model load error:', e)
-        setStatus('Error loading model: ' + (e instanceof Error ? e.message : 'Unknown error'))
+        setStatus('模型載入失敗: ' + (e instanceof Error ? e.message : '未知錯誤'))
         return
       }
 
@@ -174,14 +199,16 @@ export default function FaceLandmarks() {
           return
         }
         streamRef.current = stream
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream
+        const video = videoRef.current
+        if (video) {
+          video.srcObject = stream
+          await video.play()
         }
         setCameraReady(true)
-        setStatus('Ready')
+        setStatus('偵測中…')
       } catch (e) {
         console.error('Camera error:', e)
-        setStatus('Camera access denied. Please allow camera permission.')
+        setStatus('⚠ Camera access denied. Please allow camera permission.')
       }
     }
 
@@ -193,7 +220,6 @@ export default function FaceLandmarks() {
       if (streamRef.current) {
         streamRef.current.getTracks().forEach(t => t.stop())
       }
-      // Clean up detector
       if (detectorRef.current) {
         detectorRef.current.dispose?.()
       }
@@ -205,6 +231,19 @@ export default function FaceLandmarks() {
       startDetection()
     }
   }, [cameraReady, modelLoaded, startDetection])
+
+  // Feedback status once detection starts running
+  useEffect(() => {
+    if (!cameraReady || !modelLoaded) return
+    const timer = setTimeout(() => {
+      if (faceCount === 0 && detectionAttempts > 0) {
+        setStatus('無人臉偵測到 — 請確認面對鏡頭且光線充足')
+      } else if (faceCount > 0) {
+        setStatus(`✅ 偵測到 ${faceCount} 張臉`)
+      }
+    }, 5000)
+    return () => clearTimeout(timer)
+  }, [cameraReady, modelLoaded, faceCount, detectionAttempts])
 
   return (
     <div style={{
@@ -223,17 +262,21 @@ export default function FaceLandmarks() {
         gap: '12px',
         padding: '8px 16px',
         borderRadius: 8,
-        background: status === 'Ready' ? 'rgba(0,200,83,0.15)' : 'rgba(255,183,77,0.15)',
+        background: status.includes('Error') || status.includes('⚠') ? 'rgba(255,82,82,0.12)' : status.includes('✅') ? 'rgba(0,200,83,0.15)' : faceCount === 0 && detectionAttempts > 3 ? 'rgba(255,183,77,0.15)' : 'rgba(255,183,77,0.08)',
         fontSize: 14,
         width: '100%',
         boxSizing: 'border-box',
       }}>
         <span style={{
           width: 10, height: 10, borderRadius: '50%', display: 'inline-block', flexShrink: 0,
-          background: status === 'Ready' ? '#00C853' : status.includes('Error') ? '#FF5252' : '#FFB74D',
+          background: status.includes('Error') || status.includes('⚠') ? '#FF5252' : status.includes('✅') ? '#00C853' : faceCount > 0 ? '#00C853' : detectionAttempts > 3 ? '#FFB74D' : '#FFB74D',
         }} />
         <span>{status}</span>
-        {faceCount > 0 && <span style={{ marginLeft: 'auto', color: '#888' }}>Faces detected: {faceCount}</span>}
+        {detectionAttempts > 0 && (
+          <span style={{ marginLeft: 'auto', color: '#888', fontSize: 12 }}>
+            臉: {faceCount} | 偵測次數: {detectionAttempts}
+          </span>
+        )}
       </div>
 
       {/* Video + Canvas container */}
@@ -244,12 +287,6 @@ export default function FaceLandmarks() {
           playsInline
           muted
           style={{ width: '100%', display: 'block', transform: 'scaleX(-1)' }}
-          onLoadedData={() => {
-            if (canvasRef.current && videoRef.current) {
-              canvasRef.current.width = videoRef.current.videoWidth
-              canvasRef.current.height = videoRef.current.videoHeight
-            }
-          }}
         />
         <canvas
           ref={canvasRef}
