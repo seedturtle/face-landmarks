@@ -201,6 +201,29 @@ export default function TongueTracker() {
                     if (oCtx) {
                       oCtx.clearRect(0, 0, o.width, o.height)
 
+                      // Draw pink tongue region overlay
+                      const rPixels = roiData.data
+                      for (let py = 0; py < roiH; py++) {
+                        for (let px = 0; px < roiW; px++) {
+                          const idx = (py * roiW + px) * 4
+                          const r = rPixels[idx]
+                          const g = rPixels[idx + 1]
+                          const b = rPixels[idx + 2]
+                          const brightness = (r + g + b) / 3
+                          if (r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230) {
+                            const redD = r - Math.max(g, b)
+                            const max = Math.max(r, g, b)
+                            const min = Math.min(r, g, b)
+                            const sat = max - min
+                            const pScore = redD * 1.6 + sat * 0.35 - Math.abs(brightness - 135) * 0.15
+                            if (pScore > 10) {
+                              oCtx.fillStyle = 'rgba(255, 100, 150, 0.35)'
+                              oCtx.fillRect(px + minX, py + minY, 2, 2)
+                            }
+                          }
+                        }
+                      }
+
                       oCtx.strokeStyle = '#ffaa00'
                       oCtx.lineWidth = 2
                       oCtx.strokeRect(minX, minY, roiW, roiH)
@@ -321,7 +344,7 @@ export default function TongueTracker() {
         background: 'rgba(255,255,255,0.03)', fontSize: 12, color: '#6e7681',
         maxWidth: 480, width: '100%', boxSizing: 'border-box',
       }}>
-        <strong>提示：</strong>請張開嘴巴，保持光線充足。紅色圓點會追蹤舌頭尖端位置。
+        <strong>提示：</strong>請張開嘴巴，保持光線充足。粉色半透明區域 = 偵測到的舌面（粉色色調分析），橙色方框 = 口部 ROI，紅色圓點 = 舌尖位置。
       </div>
     </div>
   )
