@@ -22,6 +22,21 @@ export default function TongueTracker() {
   const [mouthOpen, setMouthOpen] = useState(false)
   const [metric, setMetric] = useState(0)
 
+  function pointInPolygon(
+    px: number, py: number,
+    polygon: Array<{ x: number; y: number }>,
+  ): boolean {
+    let inside = false
+    for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+      const xi = polygon[i].x, yi = polygon[i].y
+      const xj = polygon[j].x, yj = polygon[j].y
+      if ((yi > py) !== (yj > py) && px < ((xj - xi) * (py - yi)) / (yj - yi) + xi) {
+        inside = !inside
+      }
+    }
+    return inside
+  }
+
   function detectTongueInMouth(
     imageData: ImageData,
     mouthPoints: Array<{ x: number; y: number }>,
@@ -29,6 +44,10 @@ export default function TongueTracker() {
     const pixels = imageData.data
     const width = imageData.width
     const height = imageData.height
+
+    // Use outer lip contour (first 12 points) as the mask — tongue cannot be outside the lips
+    const outerLip = mouthPoints.slice(0, 12)
+    if (outerLip.length < 6) return null
 
     const mouthMinY = Math.min(...mouthPoints.map(p => p.y))
     const mouthMaxY = Math.max(...mouthPoints.map(p => p.y))
@@ -43,6 +62,9 @@ export default function TongueTracker() {
 
     for (let py = lowerMouthStart; py < height; py++) {
       for (let px = 0; px < width; px++) {
+        // Skip pixels outside the lip polygon
+        if (!pointInPolygon(px, py, outerLip)) continue
+
         const idx = (py * width + px) * 4
         const r = pixels[idx]
         const g = pixels[idx + 1]
@@ -52,8 +74,6 @@ export default function TongueTracker() {
         const saturation = max - min
         const brightness = (r + g + b) / 3
 
-        // Tongue is usually pink/red, not the darkest point. Avoid teeth/skin by requiring
-        // red dominance and moderate brightness/saturation inside the lower mouth ROI.
         const redDominance = r - Math.max(g, b)
         const pinkScore = redDominance * 1.6 + saturation * 0.35 - Math.abs(brightness - 135) * 0.15
         const isCandidate = r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230
@@ -201,10 +221,16 @@ export default function TongueTracker() {
                     if (oCtx) {
                       oCtx.clearRect(0, 0, o.width, o.height)
 
-                      // Draw pink tongue region overlay
+                      // Draw pink tongue region overlay — only inside lip contour
+                      const lipPoly = mouthPts.slice(0, 12)
                       const rPixels = roiData.data
                       for (let py = 0; py < roiH; py++) {
                         for (let px = 0; px < roiW; px++) {
+                          const gx = px + minX
+                          const gy = py + minY
+                          // Skip pixels outside the lip polygon
+                          if (!pointInPolygon(gx, gy, lipPoly)) continue
+
                           const idx = (py * roiW + px) * 4
                           const r = rPixels[idx]
                           const g = rPixels[idx + 1]
@@ -218,7 +244,7 @@ export default function TongueTracker() {
                             const pScore = redD * 1.6 + sat * 0.35 - Math.abs(brightness - 135) * 0.15
                             if (pScore > 10) {
                               oCtx.fillStyle = 'rgba(255, 100, 150, 0.35)'
-                              oCtx.fillRect(px + minX, py + minY, 2, 2)
+                              oCtx.fillRect(gx, gy, 2, 2)
                             }
                           }
                         }
@@ -293,7 +319,7 @@ export default function TongueTracker() {
       padding: '24px 16px', gap: 16,
     }}>
       <h1 style={{ fontSize: 20, fontWeight: 700, margin: 0 }}>
-        👅 舌頭尖端追蹤 (Tongue Tip Tracker)
+        👅 舌面偵測 (Tongue Surface Tracker)
       </h1>
 
       <div style={{
@@ -344,7 +370,7 @@ export default function TongueTracker() {
         background: 'rgba(255,255,255,0.03)', fontSize: 12, color: '#6e7681',
         maxWidth: 480, width: '100%', boxSizing: 'border-box',
       }}>
-        <strong>提示：</strong>請張開嘴巴，保持光線充足。粉色半透明區域 = 偵測到的舌面（粉色色調分析），橙色方框 = 口部 ROI，紅色圓點 = 舌尖位置。
+        <strong>提示：</strong>請張開嘴巴，保持光線充足。僅偵測嘴唇輪廓（綠色線條）內的粉色區域。粉色半透明區域 = 舌面，紅色圓點 = 舌尖位置。
       </div>
     </div>
   )
