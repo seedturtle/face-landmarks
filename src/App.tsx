@@ -1,6 +1,10 @@
+import { useState } from 'react'
 import FaceLandmarks from './components/FaceLandmarks'
+import TongueTracker from './components/TongueTracker'
 
 export default function App() {
+  const [mode, setMode] = useState<'landmarks' | 'tongue'>('landmarks')
+
   return (
     <div style={{
       minHeight: '100vh',
@@ -13,30 +17,50 @@ export default function App() {
       padding: '24px 16px',
       boxSizing: 'border-box',
     }}>
-      {/* Header */}
       <div style={{ textAlign: 'center', marginBottom: 24, maxWidth: 640 }}>
         <h1 style={{ fontSize: 28, fontWeight: 700, margin: '0 0 8px', background: 'linear-gradient(90deg, #667eea, #764ba2)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent' }}>
-          Face Landmarks Detection
+          Face Landmarks + Tongue Tracking
         </h1>
         <p style={{ margin: 0, color: '#999', fontSize: 14, lineHeight: 1.6 }}>
-          Real-time facial feature detection using TensorFlow.js + MediaPipe FaceMesh.{' '}
-          <br />Detects 468 facial landmarks — eyes, nose, lips, eyebrows, and face contour.
+          Real-time facial feature detection using TensorFlow.js + MediaPipe FaceMesh.
+          <br />Detects 468 facial landmarks and tracks tongue tip position.
         </p>
       </div>
 
-      {/* Main component */}
-      <FaceLandmarks />
-
-      {/* Instructions */}
-      <div style={{ marginTop: 24, padding: '16px 20px', borderRadius: 12, background: 'rgba(255,255,255,0.04)', maxWidth: 640, width: '100%', boxSizing: 'border-box', fontSize: 13, lineHeight: 1.7, color: '#aaa' }}>
-        <strong style={{ color: '#ddd' }}>Instructions:</strong>
-        <ol style={{ margin: '8px 0 0', paddingLeft: 20 }}>
-          <li>Allow camera access when prompted</li>
-          <li>Position your face in the frame with good lighting</li>
-          <li>The face mesh overlay will appear in real-time</li>
-          <li>Each facial feature is color-coded per the legend below</li>
-        </ol>
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16 }}>
+        <button
+          onClick={() => setMode('landmarks')}
+          style={{
+            padding: '10px 20px',
+            borderRadius: 8,
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 600,
+            background: mode === 'landmarks' ? '#667eea' : 'rgba(255,255,255,0.08)',
+            color: mode === 'landmarks' ? '#fff' : '#999',
+          }}
+        >
+          🤖 人臉五官辨識
+        </button>
+        <button
+          onClick={() => setMode('tongue')}
+          style={{
+            padding: '10px 20px',
+            borderRadius: 8,
+            border: 'none',
+            cursor: 'pointer',
+            fontSize: 14,
+            fontWeight: 600,
+            background: mode === 'tongue' ? '#667eea' : 'rgba(255,255,255,0.08)',
+            color: mode === 'tongue' ? '#fff' : '#999',
+          }}
+        >
+          👅 舌頭追蹤
+        </button>
       </div>
+
+      {mode === 'landmarks' ? <FaceLandmarks /> : <TongueTracker />}
     </div>
   )
 }
