@@ -32,40 +32,52 @@ export default function TongueTracker() {
 
     const mouthMinY = Math.min(...mouthPoints.map(p => p.y))
     const mouthMaxY = Math.max(...mouthPoints.map(p => p.y))
-    const mouthHeight = mouthMaxY - mouthMinY
+    const mouthHeight = Math.max(1, mouthMaxY - mouthMinY)
+    const lowerMouthStart = Math.max(0, Math.floor(mouthMinY + mouthHeight * 0.35))
 
-    let bestY = -1
-    let bestX = -1
-    let darkestVal = 255
+    let totalWeight = 0
+    let weightedX = 0
+    let weightedY = 0
+    let bestScore = 0
+    let candidates = 0
 
-    const startRow = Math.floor(height * 0.3)
-
-    for (let py = startRow; py < height; py++) {
+    for (let py = lowerMouthStart; py < height; py++) {
       for (let px = 0; px < width; px++) {
         const idx = (py * width + px) * 4
         const r = pixels[idx]
         const g = pixels[idx + 1]
         const b = pixels[idx + 2]
-        const gray = 0.299 * r + 0.587 * g + 0.114 * b
+        const max = Math.max(r, g, b)
+        const min = Math.min(r, g, b)
+        const saturation = max - min
+        const brightness = (r + g + b) / 3
 
-        if (gray < darkestVal) {
-          darkestVal = gray
-          bestX = px
-          bestY = py
+        // Tongue is usually pink/red, not the darkest point. Avoid teeth/skin by requiring
+        // red dominance and moderate brightness/saturation inside the lower mouth ROI.
+        const redDominance = r - Math.max(g, b)
+        const pinkScore = redDominance * 1.6 + saturation * 0.35 - Math.abs(brightness - 135) * 0.15
+        const isCandidate = r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230
+
+        if (isCandidate && pinkScore > 10) {
+          const weight = Math.max(1, pinkScore)
+          totalWeight += weight
+          weightedX += px * weight
+          weightedY += py * weight
+          bestScore = Math.max(bestScore, pinkScore)
+          candidates += 1
         }
       }
     }
 
-    if (bestY < 0 || darkestVal > 80) return null
+    if (candidates < 12 || totalWeight <= 0) return null
 
-    const normalizedY = (bestY - startRow) / (height - startRow)
-    const confidence = 1 - darkestVal / 80
+    const x = weightedX / totalWeight
+    const y = weightedY / totalWeight
+    const confidence = Math.min(1, Math.max(0, (bestScore / 80) * Math.min(1, candidates / 80)))
 
-    return {
-      x: bestX,
-      y: bestY,
-      confidence: Math.min(1, Math.max(0, confidence)),
-    }
+    if (confidence < 0.12) return null
+
+    return { x, y, confidence }
   }
 
   function mouthAspectRatio(mouthPoints: Array<{ x: number; y: number }>): number {
@@ -132,7 +144,7 @@ export default function TongueTracker() {
 
       setStatus('就緒 — 請張開嘴巴')
 
-      const MOUTH_OPEN_THRESH = 0.55
+      const MOUTH_OPEN_THRESH = 0.42
       runningRef.current = true
 
       async function tick() {
@@ -143,6 +155,14 @@ export default function TongueTracker() {
         if (!v || !c || !o) return
 
         if (v.readyState >= 2) {
+          if (c.width !== v.videoWidth || c.height !== v.videoHeight) {
+            c.width = v.videoWidth
+            c.height = v.videoHeight
+          }
+          if (o.width !== v.videoWidth || o.height !== v.videoHeight) {
+            o.width = v.videoWidth
+            o.height = v.videoHeight
+          }
           try {
             const results = await faceapi
               .detectAllFaces(v, new faceapi.TinyFaceDetectorOptions({ inputSize: 320, scoreThreshold: 0.4 }))
@@ -180,6 +200,10 @@ export default function TongueTracker() {
                     const oCtx = o.getContext('2d')
                     if (oCtx) {
                       oCtx.clearRect(0, 0, o.width, o.height)
+
+                      oCtx.strokeStyle = '#ffaa00'
+                      oCtx.lineWidth = 2
+                      oCtx.strokeRect(minX, minY, roiW, roiH)
 
                       oCtx.strokeStyle = '#00ff88'
                       oCtx.lineWidth = 2
