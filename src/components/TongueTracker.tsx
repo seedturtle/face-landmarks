@@ -9,6 +9,11 @@ interface TonguePoint {
   confidence: number
 }
 
+interface TongueResult {
+  point: TonguePoint | null
+  mask: Uint8Array | null  // 1=confirmed tongue pixel (flood-filled), 0=not
+}
+
 export default function TongueTracker() {
   const videoRef = useRef<HTMLVideoElement>(null)
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -21,6 +26,8 @@ export default function TongueTracker() {
   const [tonguePos, setTonguePos] = useState<TonguePoint | null>(null)
   const [mouthOpen, setMouthOpen] = useState(false)
   const [metric, setMetric] = useState(0)
+
+  const tongueResultRef = useRef<TongueResult | null>(null)
 
   function pointInPolygon(
     px: number, py: number,
@@ -37,67 +44,147 @@ export default function TongueTracker() {
     return inside
   }
 
+  function isPinkPixel(r: number, g: number, b: number): boolean {
+    const max = Math.max(r, g, b)
+    const min = Math.min(r, g, b)
+    const brightness = (r + g + b) / 3
+    const saturation = max - min
+    const redDominance = r - Math.max(g, b)
+    const pinkScore = redDominance * 1.6 + saturation * 0.35 - Math.abs(brightness - 135) * 0.15
+    return r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230 && pinkScore > 10
+  }
+
   function detectTongueInMouth(
     imageData: ImageData,
     mouthPoints: Array<{ x: number; y: number }>,
-  ): TonguePoint | null {
+  ): TongueResult {
     const pixels = imageData.data
-    const width = imageData.width
-    const height = imageData.height
+    const w = imageData.width
+    const h = imageData.height
 
-    // Use outer lip contour (first 12 points) as the mask — tongue cannot be outside the lips
     const outerLip = mouthPoints.slice(0, 12)
-    if (outerLip.length < 6) return null
+    if (outerLip.length < 6) return { point: null, mask: null }
 
-    const mouthMinY = Math.min(...mouthPoints.map(p => p.y))
-    const mouthMaxY = Math.max(...mouthPoints.map(p => p.y))
-    const mouthHeight = Math.max(1, mouthMaxY - mouthMinY)
-    const lowerMouthStart = Math.max(0, Math.floor(mouthMinY + mouthHeight * 0.35))
+    // Step 1: build pink pixel candidate map
+    // 0=not pink, 1=candidate pink (unvisited), 2=confirmed tongue (visited in BFS)
+    const label = new Uint8Array(w * h)
 
-    let totalWeight = 0
-    let weightedX = 0
-    let weightedY = 0
-    let bestScore = 0
-    let candidates = 0
-
-    for (let py = lowerMouthStart; py < height; py++) {
-      for (let px = 0; px < width; px++) {
-        // Skip pixels outside the lip polygon
-        if (!pointInPolygon(px, py, outerLip)) continue
-
-        const idx = (py * width + px) * 4
-        const r = pixels[idx]
-        const g = pixels[idx + 1]
-        const b = pixels[idx + 2]
-        const max = Math.max(r, g, b)
-        const min = Math.min(r, g, b)
-        const saturation = max - min
-        const brightness = (r + g + b) / 3
-
-        const redDominance = r - Math.max(g, b)
-        const pinkScore = redDominance * 1.6 + saturation * 0.35 - Math.abs(brightness - 135) * 0.15
-        const isCandidate = r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230
-
-        if (isCandidate && pinkScore > 10) {
-          const weight = Math.max(1, pinkScore)
-          totalWeight += weight
-          weightedX += px * weight
-          weightedY += py * weight
-          bestScore = Math.max(bestScore, pinkScore)
-          candidates += 1
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        const idx = (py * w + px) * 4
+        if (isPinkPixel(pixels[idx], pixels[idx + 1], pixels[idx + 2])) {
+          // Even outside the lip polygon it might be tongue extending out —
+          // just mark as candidate for now
+          label[py * w + px] = 1
         }
       }
     }
 
-    if (candidates < 12 || totalWeight <= 0) return null
+    // Step 2: BFS flood-fill from pink pixels inside lip polygon outward
+    const queue: Array<[number, number]> = []
+    let head = 0
 
-    const x = weightedX / totalWeight
-    const y = weightedY / totalWeight
-    const confidence = Math.min(1, Math.max(0, (bestScore / 80) * Math.min(1, candidates / 80)))
+    // Seed: pink pixels inside the lip polygon
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        if (label[py * w + px] === 1 && pointInPolygon(px, py, outerLip)) {
+          label[py * w + px] = 2
+          queue.push([px, py])
+        }
+      }
+    }
 
-    if (confidence < 0.12) return null
+    // No tongue seeds found inside the lip — try a fallback: use the middle of the lip as seed
+    if (queue.length === 0) {
+      const cx = Math.round(outerLip.reduce((s, p) => s + p.x, 0) / outerLip.length)
+      const cy = Math.round(outerLip.reduce((s, p) => s + p.y, 0) / outerLip.length)
+      // Check a vertical strip near the lip center
+      for (let px = Math.max(0, cx - 8); px <= Math.min(w - 1, cx + 8); px++) {
+        for (let py = Math.max(0, cy - 5); py <= Math.min(h - 1, cy + 5); py++) {
+          if (label[py * w + px] === 1) {
+            label[py * w + px] = 2
+            queue.push([px, py])
+          }
+        }
+      }
+    }
 
-    return { x, y, confidence }
+    // BFS: expand through 4-directionally connected pink pixels
+    const dirs = [[0, -1], [0, 1], [-1, 0], [1, 0]]
+    while (head < queue.length) {
+      const [cx, cy] = queue[head++]
+      for (const [dx, dy] of dirs) {
+        const nx = cx + dx
+        const ny = cy + dy
+        if (nx < 0 || nx >= w || ny < 0 || ny >= h) continue
+        const idx = ny * w + nx
+        if (label[idx] === 1) {
+          label[idx] = 2
+          queue.push([nx, ny])
+        }
+      }
+    }
+
+    // Step 3: Compute tongue centroid and find tip from confirmed (label===2) pixels
+    let totalPixels = 0
+    let sumX = 0
+    let sumY = 0
+
+    // First pass: centroid
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        if (label[py * w + px] === 2) {
+          sumX += px
+          sumY += py
+          totalPixels++
+        }
+      }
+    }
+
+    if (totalPixels < 15) {
+      // No significant tongue region found — return empty mask too
+      return { point: null, mask: null }
+    }
+
+    const cx = sumX / totalPixels
+    const cy = sumY / totalPixels
+
+    // Find tip: the confirmed tongue pixel furthest from centroid,
+    // biased toward the lower direction (where the tongue tip typically points)
+    let maxDist2 = 0
+    let tipX = cx
+    let tipY = cy
+
+    for (let py = 0; py < h; py++) {
+      for (let px = 0; px < w; px++) {
+        if (label[py * w + px] === 2) {
+          const dx = px - cx
+          const dy = py - cy
+          // Bias downward (positive Y): dy gets 1.5x weight
+          const dist2 = dx * dx + dy * dy * 1.5
+          if (dist2 > maxDist2) {
+            maxDist2 = dist2
+            tipX = px
+            tipY = py
+          }
+        }
+      }
+    }
+
+    const confidence = Math.min(1, totalPixels / 200)
+
+    // Build output mask (just label === 2 → 1)
+    const mask = new Uint8Array(w * h)
+    for (let i = 0; i < w * h; i++) {
+      mask[i] = label[i] === 2 ? 1 : 0
+    }
+
+    tongueResultRef.current = {
+      point: { x: tipX, y: tipY, confidence },
+      mask,
+    }
+
+    return tongueResultRef.current
   }
 
   function mouthAspectRatio(mouthPoints: Array<{ x: number; y: number }>): number {
@@ -215,34 +302,21 @@ export default function TongueTracker() {
                     const roiData = ctx.getImageData(0, 0, roiW, roiH)
                     const localMouth = mouthPts.map(p => ({ x: p.x - minX, y: p.y - minY }))
 
-                    const tip = detectTongueInMouth(roiData, localMouth)
+                    const result = detectTongueInMouth(roiData, localMouth)
+                    const tip = result.point
+                    const mask = result.mask
 
                     const oCtx = o.getContext('2d')
                     if (oCtx) {
                       oCtx.clearRect(0, 0, o.width, o.height)
 
-                      // Draw pink tongue region overlay — only inside lip contour
-                      const lipPoly = mouthPts.slice(0, 12)
-                      const rPixels = roiData.data
-                      for (let py = 0; py < roiH; py++) {
-                        for (let px = 0; px < roiW; px++) {
-                          const gx = px + minX
-                          const gy = py + minY
-                          // Skip pixels outside the lip polygon
-                          if (!pointInPolygon(gx, gy, lipPoly)) continue
-
-                          const idx = (py * roiW + px) * 4
-                          const r = rPixels[idx]
-                          const g = rPixels[idx + 1]
-                          const b = rPixels[idx + 2]
-                          const brightness = (r + g + b) / 3
-                          if (r > 80 && r > g + 10 && r > b + 8 && brightness > 45 && brightness < 230) {
-                            const redD = r - Math.max(g, b)
-                            const max = Math.max(r, g, b)
-                            const min = Math.min(r, g, b)
-                            const sat = max - min
-                            const pScore = redD * 1.6 + sat * 0.35 - Math.abs(brightness - 135) * 0.15
-                            if (pScore > 10) {
+                      // Draw pink tongue region overlay using the flood-filled mask
+                      if (mask && mask.length === roiW * roiH) {
+                        for (let py = 0; py < roiH; py++) {
+                          for (let px = 0; px < roiW; px++) {
+                            if (mask[py * roiW + px] === 1) {
+                              const gx = px + minX
+                              const gy = py + minY
                               oCtx.fillStyle = 'rgba(255, 100, 150, 0.35)'
                               oCtx.fillRect(gx, gy, 2, 2)
                             }
@@ -272,7 +346,7 @@ export default function TongueTracker() {
 
                         oCtx.fillStyle = '#ff3366'
                         oCtx.beginPath()
-                        oCtx.arc(globalX, globalY, 6, 0, Math.PI * 2)
+                        oCtx.arc(globalX, globalY, 5, 0, Math.PI * 2)
                         oCtx.fill()
 
                         oCtx.fillStyle = '#ffffff'
@@ -370,7 +444,7 @@ export default function TongueTracker() {
         background: 'rgba(255,255,255,0.03)', fontSize: 12, color: '#6e7681',
         maxWidth: 480, width: '100%', boxSizing: 'border-box',
       }}>
-        <strong>提示：</strong>請張開嘴巴，保持光線充足。僅偵測嘴唇輪廓（綠色線條）內的粉色區域。粉色半透明區域 = 舌面，紅色圓點 = 舌尖位置。
+        <strong>提示：</strong>請張開嘴巴，保持光線充足。以嘴唇輪廓內為種子點，經 flood-fill 連通區域分析保留完整舌面（含伸出嘴唇的部份）。粉色半透明區域 = 舌面，紅色圓點 = 舌尖位置。
       </div>
     </div>
   )
