@@ -2,3 +2,25 @@ node_modules
 dist
 .vite
 *.local
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Large model files (download separately)
+python/shape_predictor_68_face_landmarks.dat
+
+# Output directories
+python/frames/
+python/result/
+python/test/
+python/defective_frames/

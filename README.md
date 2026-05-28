@@ -1,44 +1,55 @@
 # Face Landmarks Detection
 
+Real-time facial feature detection and tongue tip tracking.
+
+## Two Approaches
+
+This repository contains two implementations:
+
+### 1. Web App (Browser-based)
+
 A real-time facial feature detection web app using TensorFlow.js and MediaPipe FaceMesh.
 
-Built with **Vite + React + TypeScript**, deployable to **Zeabur** as a static site.
+- **Location:** Root directory (Vite + React + TypeScript)
+- **Features:** 468 facial landmarks, color-coded features, runs in browser
+- **Deploy:** Zeabur-ready
 
-## Features
+### 2. Python Module (Desktop)
 
-- Real-time face detection via webcam
-- 468 facial landmark points
-- Color-coded facial features: eyes, eyebrows, nose, lips, face contour, and iris
-- Canvas overlay with mesh visualization
-- Runs entirely in the browser — no server-side processing
+Python-based face landmark detection and tongue tip tracking using OpenCV and dlib.
+
+- **Location:** `python/` directory
+- **Features:** 68-point landmarks, tongue tip tracking, mouth aspect ratio
+- **Use case:** Research, clinical applications, webcam/video processing
 
 ## Quick Start
+
+### Web App
 
 ```bash
 npm install
 npm run dev
 ```
 
-Open http://localhost:3000 in your browser. Allow camera access when prompted.
+Open http://localhost:3000 and allow camera access.
 
-## Deploy to Zeabur
+### Python Module
 
-1. Push this repository to GitHub
-2. Go to [Zeabur.com](https://zeabur.com) and create a new project
-3. Select your GitHub repo
-4. Zeabur will auto-detect the Vite project and deploy it
-
-The `zeabur.json` configuration is already included.
+```bash
+cd python
+pip install -r requirements.txt
+# Download shape_predictor_68_face_landmarks.dat (see python/README.md)
+python detect-tongue-tip-real-time.py
+```
 
 ## Tech Stack
 
-- **Vite** — Build tool and dev server
-- **React 18** — UI framework
-- **TypeScript** — Type safety
-- **TensorFlow.js** — Machine learning runtime
-- **@tensorflow-models/face-landmarks-detection** — MediaPipe FaceMesh model
+| Component | Technology |
+|-----------|------------|
+| Web App | Vite, React 18, TypeScript, TensorFlow.js, MediaPipe FaceMesh |
+| Python | OpenCV, dlib, imutils, numpy, scipy |
 
-## Facial Feature Colors
+## Facial Feature Colors (Web App)
 
 | Feature | Color |
 |---------|-------|
@@ -49,10 +60,23 @@ The `zeabur.json` configuration is already included.
 | Lips | Pink |
 | Iris | Blue |
 
-## Browser Support
+## Deploy to Zeabur
 
-Requires a browser with WebGL support and camera access (HTTPS or localhost).
+1. Push this repository to GitHub
+2. Go to [Zeabur.com](https://zeabur.com) and create a new project
+3. Select your GitHub repo
+4. Zeabur will auto-detect the Vite project and deploy it
+
+The `zeabur.json` configuration is already included.
+
+## Browser Support (Web App)
+
+Requires WebGL and camera access (HTTPS or localhost):
 
 - Chrome / Edge (recommended)
 - Firefox
 - Safari 16.4+
+
+## License
+
+See repository for license details.
